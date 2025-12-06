@@ -1,0 +1,1 @@
+export const LOCAL_SERVER_URL = 'http://192.168.15.44:3000'
