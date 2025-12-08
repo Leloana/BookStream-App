@@ -1,13 +1,50 @@
 import { Book } from '../../domain/models/Book';
+
 import { searchGoogleBooks } from '../api/googleBooksApi';
+
 import { searchLocalBooks } from '../api/localApi';
-import { SearchFilters, searchBooks as searchOpenLib } from '../api/openLibraryApi';
+
+import { searchOpenLibrary } from '../api/openLibraryApi';
+
 import { getStandardEbooks } from '../api/standardEbooksApi';
+
+export interface SearchFilters {
+  language?: string | null;
+  subject?: string | null;
+  source?: string | null;
+}
+
+const API_TIMEOUT = 5000;
+
+// === FUNÇÕES AUXILIARES ===
+
+// 1. Proteção contra demora (CORRIGIDO: Limpa o timer se der sucesso)
+async function withTimeout<T>(promise: Promise<T[]>, ms: number, apiName: string): Promise<T[]> {
+    let timeoutId: any;
+
+    const timeoutPromise = new Promise<T[]>((resolve) => {
+        timeoutId = setTimeout(() => {
+            console.warn(`⚠️ Timeout: ${apiName} demorou mais que ${ms}ms e foi ignorado.`);
+            resolve([]); 
+        }, ms);
+    });
+
+    const apiPromise = promise
+        .then((result) => {
+            clearTimeout(timeoutId);
+            return result;
+        })
+        .catch((error) => {
+            clearTimeout(timeoutId); 
+            throw error; 
+        });
+
+    return Promise.race([apiPromise, timeoutPromise]);
+}
 
 function deduplicateBooks(books: Book[]): Book[] {
   const seen = new Set();
   return books.filter(book => {
-    // Cria uma chave única: "titulo_autor" (tudo minúsculo e sem espaços)
     const safeTitle = book.title ? book.title.toLowerCase().replace(/\s/g, '').substring(0, 15) : 'sem_titulo';
     const safeAuthor = book.author ? book.author.toLowerCase().replace(/\s/g, '').substring(0, 5) : 'desc';
     
@@ -18,46 +55,58 @@ function deduplicateBooks(books: Book[]): Book[] {
     return true;
   });
 }
-
-// Função para embaralhar (Shuffle)
 function shuffleArray<T>(array: T[]): T[] {
   return array.sort(() => Math.random() - 0.5);
 }
 
 export const BookRepository = {
-  
-  // === 1. BUSCA GERAL (Já existente) ===
+
   searchAll: async (query: string, filters?: SearchFilters): Promise<Book[]> => {
+    console.log(`[Repo] Buscando: "${query}" | Fonte: ${filters?.source} | Idioma: ${filters?.language}`);
     try {
-      const [localResults,openLibResults, googleResults] = await Promise.all([
-        searchLocalBooks(query),
-        searchOpenLib(query, filters),
-        searchGoogleBooks(query, filters) 
-      ]);
-      const allBooks = [...localResults,...googleResults, ...openLibResults];
+      const promises: Promise<Book[]>[] = [];
+      const src = filters?.source;
+
+      if (!src || src === 'local') {
+        promises.push(searchLocalBooks(query));
+      }
+
+      if (!src || src === 'openlibrary') {
+        promises.push(
+            withTimeout(searchOpenLibrary(query, filters), API_TIMEOUT, 'OpenLibrary')
+        );
+      }
+
+      if (!src || src === 'google') {
+        promises.push(
+            withTimeout(searchGoogleBooks(query, filters), API_TIMEOUT, 'GoogleBooks')
+        );
+      }
+      if (promises.length === 0) return [];
+      const resultsMatrix = await Promise.all(promises);
+
+      const allBooks = resultsMatrix.flat();
+      
       return shuffleArray(allBooks);
+
     } catch (e) {
       console.error("Erro no repositório (searchAll):", e);
       return [];
     }
   },
 
-  // === 2. BUSCA POR CATEGORIA (Múltiplas APIs) ===
   getBooksBySubject: async (subject: string): Promise<Book[]> => {
     try {
-      // Chamamos as duas APIs passando o filtro de assunto
-      // O Google aceita subject via filtro também (adaptamos isso no googleBooksApi)
       const [openLibResults, googleResults] = await Promise.all([
-        searchOpenLib('', { subject: subject }), 
+        searchOpenLibrary('', { subject: subject }), 
         searchGoogleBooks('', { subject: subject })
       ]);
 
-      // Juntamos tudo
+
       const allBooks = [...googleResults, ...openLibResults];
       
-      // Removemos duplicatas e embaralhamos para não ficar sempre na mesma ordem
       const unique = deduplicateBooks(allBooks);
-      return shuffleArray(unique).slice(0, 15); // Retorna até 15 livros
+      return shuffleArray(unique).slice(0, 15); 
 
     } catch (e) {
       console.error(`Erro no repositório (subject: ${subject}):`, e);
@@ -65,7 +114,7 @@ export const BookRepository = {
     }
   },
 
-  // === 3. RECOMENDAÇÕES MISTURADAS (Múltiplas APIs) ===
+
   getMixedRecommendations: async (tags: string[]): Promise<Book[]> => {
     if (tags.length === 0) return [];
 
@@ -74,36 +123,24 @@ export const BookRepository = {
         const isAuthor = tag.startsWith('author:');
         const cleanTag = isAuthor ? tag.replace('author:', '') : tag;
 
-        // PREPARA AS QUERIES ESPECÍFICAS PARA CADA API
-        
-        // Google usa "inauthor:" para autores
         const googleQuery = isAuthor ? `inauthor:${cleanTag}` : cleanTag;
-        
-        // OpenLib usa "author:" para autores (a função searchOpenLib já lida com query string)
+
         const openLibQuery = isAuthor ? `author:${cleanTag}` : cleanTag;
 
-        // Sorteio simples de página (para o Google usamos startIndex logicamente, 
-        // mas aqui vamos confiar no shuffle das APIs com termos genéricos)
-        
-        // Dispara busca nas duas fontes para essa tag específica
         const [ol, gb] = await Promise.all([
-             searchOpenLib(openLibQuery),
+             searchOpenLibrary(openLibQuery),
              searchGoogleBooks(googleQuery)
         ]);
 
         return [...gb, ...ol];
       });
 
-      // Aguarda todas as tags serem processadas
       const resultsMatrix = await Promise.all(promises);
       
-      // "Achata" o array de arrays em um só
       const allBooks = resultsMatrix.flat();
 
-      // Limpeza final
       const uniqueBooks = deduplicateBooks(allBooks);
-      
-      // Embaralha tudo para parecer uma curadoria "Netflix"
+
       return shuffleArray(uniqueBooks).slice(0, 20);
 
     } catch (e) {
@@ -114,10 +151,7 @@ export const BookRepository = {
 
   getRestoredClassics: async (): Promise<Book[]> => {
     try {
-      // Chama a API direta
-      const books = await getStandardEbooks();
-      // Não precisa filtrar muito pois a curadoria deles já é perfeita
-      return books;
+      return await withTimeout(getStandardEbooks(), API_TIMEOUT, 'Standard Classics');
     } catch (e) {
       console.error("Erro ao buscar clássicos:", e);
       return [];

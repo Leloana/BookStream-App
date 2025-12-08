@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { Book } from '../../domain/models/Book';
-import { SearchFilters } from './openLibraryApi';
+import { SearchFilters } from '../repositories/BookRepository';
 
 const api = axios.create({
   baseURL: 'https://gutendex.com',
