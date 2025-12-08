@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { File, Paths } from 'expo-file-system';
+import { getInfoAsync } from 'expo-file-system/legacy';
+
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,18 +19,17 @@ import {
 } from 'react-native';
 import { RootStackParamList } from '../AppNavigator';
 import { getBookDetails } from '../data/api/openLibraryApi';
-import { libraryService } from '../services/libraryService';
+import { LibraryBook, libraryService } from '../services/libraryService';
 import { preferencesService } from '../services/preferencesService';
 import { storageService } from '../services/storageService';
+import * as IntentLauncher from 'expo-intent-launcher';
+import * as Sharing from 'expo-sharing';
+import { getLangCode } from '../services/utils';
+import { SOURCE_MAP } from '../services/utils';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'BookDetails'>;
 
-const SOURCE_MAP: Record<string, { label: string, color: string, text: string }> = {
-  openlibrary: { label: 'Open Library', color: '#E8DED1', text: '#5D4037' }, // Bege Escuro
-  google:      { label: 'Google Books', color: '#D1E8E2', text: '#2C5F2D' }, // Verde Sálvia
-  gutenberg:   { label: 'Gutenberg',    color: '#E8D1D1', text: '#5F2C2C' }, // Rosado Antigo
-  default:     { label: 'Acervo',       color: '#F0F0F0', text: '#666' }
-};
+
 
 const getSourceInfo = (source?: string) => SOURCE_MAP[source || 'default'] || SOURCE_MAP.default;
 
@@ -41,17 +42,6 @@ const THEME = {
   accentDark: '#A0523D',  // Terracota escuro para sombras/texto forte
   tagBg: '#E8DED1',       // Bege para tags
   divider: '#E0D6CC',
-};
-
-const LANGUAGE_MAP: Record<string, string> = {
-  none: 'Not Found',
-  por: 'Português',
-  eng: 'Inglês',
-  spa: 'Espanhol',
-  fre: 'Francês',
-  ger: 'Alemão',
-  ita: 'Italiano',
-  jpn: 'Japonês'
 };
 
 export default function BookDetailsScreen({ route }: Props) {
@@ -67,22 +57,54 @@ export default function BookDetailsScreen({ route }: Props) {
   const [loadingDetails, setLoadingDetails] = useState(book.source === 'openlibrary');
 
   const [isFavorite, setIsFavorite] = useState(false); 
+  const [localUri, setLocalUri] = useState<string | null>(null);
 
-
-  const getFormattedLanguage = () => {
-    if (!book.language || book.language.length === 0) return null;
-    const code = book.language[0];
-    return LANGUAGE_MAP[code] || code.toUpperCase();
-  };
-
-  const languageLabel = getFormattedLanguage();
+  const languageLabel = getLangCode(book.language);
+  const sourceInfo = getSourceInfo(book.source);
 
   useEffect(() => {
     checkPdfAvailability();
+    checkLibraryStatus();
     book.source === 'openlibrary'? loadExtraDetails() : setLoadingDetails(false);
-    checkFavoriteStatus();
 
   }, []);
+
+  async function checkLibraryStatus() {
+    checkFavoriteStatus();
+
+    const allDownloaded = await libraryService.getBooks();
+    const found = allDownloaded.find(b => b.id === book.id);
+    
+    if (found && found.localUri) {
+        // Confirma se o arquivo ainda existe no disco
+        const info = await getInfoAsync(found.localUri);
+        if (info.exists) {
+            setLocalUri(found.localUri);
+        }
+    }
+  }
+
+  async function openFile() {
+    if (!localUri) return;
+
+    const uri = localUri;
+    if (Platform.OS === 'android') {
+      try {
+        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+          data: uri,
+          flags: 1, 
+          type: 'application/pdf',
+        });
+        return;
+      } catch (e) {
+        console.log("Erro Intent...");
+      }
+    }
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });
+    }
+  }
+
   async function checkFavoriteStatus() {
     const status = await libraryService.isFavorite(book.id);
     setIsFavorite(status);
@@ -106,7 +128,7 @@ export default function BookDetailsScreen({ route }: Props) {
     }
     try {
       const response = await fetch(book.pdfUrl, { method: 'HEAD' });
-      if (response.ok) {
+      if (response.ok || (book.source === 'local' && response.status === 405)) {
         setIsAvailable(true);
         const bytes = response.headers.get('Content-Length');
         if (bytes) {
@@ -147,8 +169,9 @@ export default function BookDetailsScreen({ route }: Props) {
          
          await libraryService.addBook(book, finalUri);
          await preferencesService.addInterestFromBook(book); 
+         
+         setLocalUri(finalUri);
 
-         Alert.alert('Sucesso', 'Livro salvo!');
        } catch (e) {
          Alert.alert('Erro', 'Falha ao salvar.');
        } finally {
@@ -176,6 +199,19 @@ export default function BookDetailsScreen({ route }: Props) {
 
 const renderActionButton = () => {
     if (checking) return <ActivityIndicator size="small" color={THEME.textDark} />;
+    
+    if (localUri) {
+        return (
+            <TouchableOpacity 
+                style={[styles.mainButton, { backgroundColor: '#4CAF50' }]} // Verde
+                onPress={openFile}
+                activeOpacity={0.8}
+            >
+                <Ionicons name="book-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.mainButtonText}>Ler Agora</Text>
+            </TouchableOpacity>
+        );
+    }
 
     if (downloading) {
       return (
@@ -268,7 +304,13 @@ const renderActionButton = () => {
                       <Text style={styles.infoText}>{languageLabel}</Text>
                   )}
               </View>
-               <Text style={styles.sourceName}>{getSourceInfo(book.source).label}</Text>
+               <View style={styles.badgesRow}>
+                <View style={[styles.sourceBadge, { backgroundColor: sourceInfo.color }]}>
+                    <Text style={[styles.sourceText, { color: sourceInfo.text }]}>
+                        {sourceInfo.label}
+                    </Text>
+                </View>
+            </View>
           </View>
         </View>
 
@@ -374,8 +416,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
     borderRadius: 14,
     width: '100%',
+    flexDirection: 'row', // Adicionado para ícone + texto
+    justifyContent: 'center', // Centraliza
     alignItems: 'center',
-    // Sombra do botão
     shadowColor: THEME.accentDark,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -468,5 +511,22 @@ const styles = StyleSheet.create({
   webReaderText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   favButton: {
       padding: 4, // Área de toque maior
+  },
+    // Estilos novos para o Badge da Fonte
+  badgesRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sourceBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12, // Borda redonda estilo "chip"
+    alignSelf: 'flex-start',
+  },
+  sourceText: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
 });

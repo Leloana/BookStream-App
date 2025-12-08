@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Book } from '../domain/models/Book';
 
@@ -7,34 +7,19 @@ interface Props {
   onPress: () => void;
 }
 
-const getLangCode = (languages?: string[]) => {
-  if (!languages || languages.length === 0) return null;
-  const code = languages[0].toLowerCase();
-  
-  if (code.includes('por')) return 'PT';
-  if (code.includes('eng')) return 'EN';
-  if (code.includes('spa')) return 'ES';
-  if (code.includes('fre')) return 'FR';
-  return code.substring(0, 2).toUpperCase();
-};
-
-// Configuração das fontes
-const SOURCE_MAP: Record<string, { label: string, color: string, text: string }> = {
-  openlibrary: { label: 'Open Library', color: '#E8DED1', text: '#5D4037' }, // Bege Escuro
-  google:      { label: 'Google Books', color: '#D1E8E2', text: '#2C5F2D' }, // Verde Sálvia
-  gutenberg:   { label: 'Gutenberg',    color: '#E8D1D1', text: '#5F2C2C' }, // Rosado Antigo
-  standard:    { label: 'Standard Ebooks', color: '#E1D1E8', text: '#4A2C5F' },
-  local:       { label: 'Servidor Local', color: '#D0E0FF', text: '#003366' },
-  default:     { label: 'Acervo',       color: '#F0F0F0', text: '#666' }
-};
+import { getLangCode } from '../services/utils';
+import { SOURCE_MAP } from '../services/utils';
 
 const getSourceInfo = (source?: string) => SOURCE_MAP[source || 'default'] || SOURCE_MAP.default;
 
-export default function BookCard({ book, onPress }: Props) {
+function BookCard({ book, onPress }: Props) {
   const langBadge = getLangCode(book.language);
+  
+  // Pegamos as cores aqui
+  const sourceInfo = getSourceInfo(book.source);
 
   return (
-    <TouchableOpacity style={styles.container} onPress={onPress}>
+    <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={0.7}>
       {book.coverUrl ? (
         <Image source={{ uri: book.coverUrl }} style={styles.cover} />
       ) : (
@@ -42,40 +27,60 @@ export default function BookCard({ book, onPress }: Props) {
           <Text style={styles.coverPlaceholderText}>Sem capa</Text>
         </View>
       )}
+      
       <View style={styles.info}>
         <Text style={styles.title} numberOfLines={2}>
           {book.title}
         </Text>
-        {book.author && (
-          <Text style={styles.author} numberOfLines={1}>
-            {book.author} 
-          </Text>
-        )}
-        {book.year && (
-          <Text style={styles.year}>{book.year} - {langBadge}</Text>
-        )}
+        
+        <Text style={styles.author} numberOfLines={1}>
+          {book.author || 'Autor desconhecido'} 
+        </Text>
+        
+        <View style={styles.metaContainer}>
+          {book.year && (
+            <Text style={styles.year}>{book.year}</Text>
+          )}
+          
+          {/* Badge de Idioma */}
+          {langBadge && (
+            <>
+              <Text style={styles.dot}>•</Text>
+              <Text style={styles.lang}>{langBadge}</Text>
+            </>
+          )}
+        </View>
 
-        <Text style={styles.year}>{getSourceInfo(book.source).label}</Text>
-
+        {/* === CORREÇÃO 2: Badge de Fonte Colorida === */}
+        <View style={styles.badgesRow}>
+            <View style={[styles.sourceBadge, { backgroundColor: sourceInfo.color }]}>
+                <Text style={[styles.sourceText, { color: sourceInfo.text }]}>
+                    {sourceInfo.label}
+                </Text>
+            </View>
+        </View>
 
       </View>
     </TouchableOpacity>
   );
 }
 
+export default memo(BookCard);
+
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ddd',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    backgroundColor: '#FFF', // Garante fundo branco
   },
   cover: {
-    width: 60,
-    height: 90,
-    borderRadius: 4,
-    backgroundColor: '#ccc',
+    width: 55, // Levemente ajustado
+    height: 85,
+    borderRadius: 6,
+    backgroundColor: '#E0E0E0',
   },
   coverPlaceholder: {
     justifyContent: 'center',
@@ -83,25 +88,57 @@ const styles = StyleSheet.create({
   },
   coverPlaceholderText: {
     fontSize: 10,
-    color: '#555',
+    color: '#757575',
   },
   info: {
     flex: 1,
-    marginLeft: 12,
-    justifyContent: 'center',
+    marginLeft: 14,
+    justifyContent: 'flex-start', // Alinha ao topo
   },
   title: {
-    fontWeight: '600',
-    fontSize: 14,
+    fontWeight: '700',
+    fontSize: 15,
+    color: '#333',
+    marginBottom: 4,
   },
   author: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#666',
-    marginTop: 4,
+    marginBottom: 6,
+  },
+  metaContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   year: {
     fontSize: 12,
-    color: '#999',
-    marginTop: 2,
+    color: '#888',
+  },
+  dot: {
+    marginHorizontal: 6,
+    fontSize: 8,
+    color: '#CCC',
+  },
+  lang: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#555',
+  },
+  // Estilos novos para o Badge da Fonte
+  badgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sourceBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12, // Borda redonda estilo "chip"
+    alignSelf: 'flex-start',
+  },
+  sourceText: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
 });

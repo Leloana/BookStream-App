@@ -20,7 +20,6 @@ import { Book } from '../domain/models/Book';
 import { LibraryBook, libraryService } from '../services/libraryService';
 import { storageService } from '../services/storageService';
 
-// Função auxiliar de idioma
 const getLangCode = (languages?: string[]) => {
   if (!languages || languages.length === 0) return null;
   const code = languages[0].toLowerCase();
@@ -42,6 +41,7 @@ const THEME = {
   success: '#4CAF50', // Verde para status baixado
   neutral: '#E0E0E0',
 };
+
 
 // Recebendo navigation via props para poder ir para Details
 export default function MyBooksScreen({ navigation }: any) {
@@ -67,6 +67,11 @@ export default function MyBooksScreen({ navigation }: any) {
     setItems(data);
     setLoading(false);
   }
+
+  const handleCardPress = (item: LibraryBook) => {
+    // Passamos o objeto item como 'book' para a tela de detalhes
+    navigation.navigate('BookDetails', { book: item });
+  };
 
   async function openFile(book: LibraryBook) {
     if (!book.localUri) return;
@@ -130,9 +135,14 @@ export default function MyBooksScreen({ navigation }: any) {
     const langBadge = getLangCode(item.language);
     const isDownloaded = item.isDownloaded && item.localUri;
 
-    return (
-      <View style={styles.card}>
-        {/* Capa */}
+return (
+      // 1. Mudei de View para TouchableOpacity no container principal
+      <TouchableOpacity 
+        style={styles.card} 
+        onPress={() => handleCardPress(item)}
+        activeOpacity={0.7}
+      >
+        {/* Capa (mantido igual) */}
         <View style={styles.coverShadow}>
           <View style={styles.coverContainer}>
               {item.coverUrl ? (
@@ -172,7 +182,8 @@ export default function MyBooksScreen({ navigation }: any) {
               </View>
           </View>
   
-          {/* LÓGICA CONDICIONAL DE BOTÕES */}
+          {/* LÓGICA DE BOTÕES (IMPORTANTE: Mantenha TouchableOpacity aqui dentro) */}
+          {/* O TouchableOpacity interno captura o toque antes do card pai */}
           <View style={styles.actionsRow}>
               
               {isDownloaded ? (
@@ -180,7 +191,6 @@ export default function MyBooksScreen({ navigation }: any) {
                     <TouchableOpacity 
                         style={styles.readButton} 
                         onPress={() => openFile(item)}
-                        activeOpacity={0.8}
                     >
                         <Ionicons name="book-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
                         <Text style={styles.readButtonText}>Ler</Text>
@@ -189,7 +199,6 @@ export default function MyBooksScreen({ navigation }: any) {
                     <TouchableOpacity 
                         style={styles.deleteButton} 
                         onPress={() => confirmDelete(item)}
-                        activeOpacity={0.7}
                     >
                         <Ionicons name="trash-outline" size={20} color={THEME.danger} />
                     </TouchableOpacity>
@@ -199,7 +208,6 @@ export default function MyBooksScreen({ navigation }: any) {
                     <TouchableOpacity 
                         style={styles.downloadButton} 
                         onPress={() => handleDownloadPress(item)}
-                        activeOpacity={0.8}
                     >
                         <Ionicons name="download-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
                         <Text style={styles.readButtonText}>Baixar</Text>
@@ -208,9 +216,7 @@ export default function MyBooksScreen({ navigation }: any) {
                     <TouchableOpacity 
                         style={styles.deleteButton} 
                         onPress={() => handleRemoveFavorite(item.id)}
-                        activeOpacity={0.7}
                     >
-                        {/* Ícone de coração quebrado ou X */}
                         <Ionicons name="heart-dislike-outline" size={20} color={THEME.textLight} />
                     </TouchableOpacity>
                   </>
@@ -218,7 +224,7 @@ export default function MyBooksScreen({ navigation }: any) {
 
           </View>
         </View>
-      </View>
+      </TouchableOpacity> // Fecha o TouchableOpacity do card
     );
   };
 

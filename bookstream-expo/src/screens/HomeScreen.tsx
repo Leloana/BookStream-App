@@ -22,10 +22,6 @@ import SearchBar from '../components/SearchBar';
 import { BookRepository } from '../data/repositories/BookRepository';
 import { Book } from '../domain/models/Book';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
 type Props = NativeStackScreenProps<RootStackParamList, 'MainTabs'>; 
 
 const LANGUAGES = [
@@ -44,6 +40,16 @@ const GENRES = [
   { label: 'História', value: 'history' },
 ];
 
+const SOURCES = [
+  { label: 'Todas', value: null },
+  { label: 'Open Library', value: 'openlibrary' },
+  { label: 'Google Books', value: 'google' },
+  { label: 'Servidor Local', value: 'local' },
+  
+  // { label: 'Gutenberg', value: 'gutenberg' }, // Se ainda estiver usando
+  // { label: 'Standard Ebooks', value: 'standard' },
+];
+
 const THEME = {
   background: '#FAF9F6',
   textDark: '#2C2C2C',
@@ -51,6 +57,18 @@ const THEME = {
   accent: '#C77D63',
   border: '#E0D6CC',
 };
+
+const FilterChip = ({ label, selected, onPress }: { label: string, selected: boolean, onPress: () => void }) => (
+  <TouchableOpacity
+    style={[styles.chip, selected && styles.chipSelected]}
+    onPress={onPress}
+    activeOpacity={0.7}
+  >
+    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
 
 export default function HomeScreen({ navigation }: any) {
   const [query, setQuery] = useState('');
@@ -60,6 +78,7 @@ export default function HomeScreen({ navigation }: any) {
 
   const [selectedLang, setSelectedLang] = useState<string | null>(null);
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
+  const [selectedSource, setSelectedSource] = useState<string | null>(null);
 
   const [showFilters, setShowFilters] = useState(false);
 
@@ -67,14 +86,15 @@ export default function HomeScreen({ navigation }: any) {
     Keyboard.dismiss();
     if (showFilters) toggleFiltersVisibility(); 
 
-    if (!query.trim() && !selectedLang && !selectedGenre) return;
+    if (!query.trim() && !selectedLang && !selectedGenre && !selectedSource) return;
 
     try {
       setLoading(true);
       setError(null);
       const result = await BookRepository.searchAll(query, {
         language: selectedLang,
-        subject: selectedGenre
+        subject: selectedGenre,
+        source: selectedSource,
       });
       setBooks(result);
     } catch (e) {
@@ -92,19 +112,8 @@ export default function HomeScreen({ navigation }: any) {
 
   const toggleLang = (value: string) => setSelectedLang(prev => prev === value ? null : value);
   const toggleGenre = (value: string) => setSelectedGenre(prev => prev === value ? null : value);
+  const toggleSource = (value: string | null) => setSelectedSource(value);
 
-  // Chip Component
-  const FilterChip = ({ label, selected, onPress }: { label: string, selected: boolean, onPress: () => void }) => (
-    <TouchableOpacity 
-      style={[styles.chip, selected && styles.chipSelected]} 
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
 
   return (
     <View style={styles.container}>
@@ -121,12 +130,23 @@ export default function HomeScreen({ navigation }: any) {
         onChangeText={setQuery}
         onSubmit={handleSearch}
         onToggleFilters={toggleFiltersVisibility}
-        filtersActive={!!selectedLang || !!selectedGenre}
+        filtersActive={!!selectedLang || !!selectedGenre || !!selectedSource}
       />
 
-      {/* ÁREA DE FILTROS (Condicional) */}
+      {/* ÁREA DE FILTROS */}
       {showFilters && (
         <View style={styles.filtersContainer}>
+            <Text style={styles.filterLabel}>Filtrar por Fonte</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scrollFilters}>
+                {SOURCES.map((source) => (
+                    <FilterChip 
+                    key={source.label} 
+                    label={source.label} 
+                    selected={selectedSource === source.value} 
+                    onPress={() => toggleSource(source.value)} 
+                    />
+                ))}
+            </ScrollView>
             <Text style={styles.filterLabel}>Filtrar Idioma</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scrollFilters}>
                 {LANGUAGES.map((lang) => (
@@ -171,6 +191,10 @@ export default function HomeScreen({ navigation }: any) {
             onPress={() => navigation.navigate('BookDetails', { book: item })}
           />
         )}
+        initialNumToRender={6}
+        maxToRenderPerBatch={4}
+        windowSize={5}
+        removeClippedSubviews={true}
         ListEmptyComponent={
           !loading ? (
             <View style={styles.emptyContainer}>
