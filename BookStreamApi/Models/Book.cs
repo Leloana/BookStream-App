@@ -22,6 +22,7 @@ public class Book
 
     public string? PdfFilePath { get; set; } 
     public string? CoverFilePath { get; set; }
+    public string? Language { get; set; }
 
     // Campos de auditoria
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
