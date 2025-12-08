@@ -10,6 +10,8 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 // 2. Registrar Serviço de Arquivos
 builder.Services.AddSingleton<FileStorageService>();
+builder.Services.AddHttpClient<OpenLibraryService>();
+builder.Services.AddHttpClient<GoogleBooksService>();
 
 builder.Services.AddControllers().AddJsonOptions(options =>
     {
@@ -38,4 +40,4 @@ if (app.Environment.IsDevelopment())
 app.MapControllers();
 
 // Importante: Rodar no IP 0.0.0.0 para ser acessível na rede
-app.Run();
+app.Run("http://0.0.0.0:3000");

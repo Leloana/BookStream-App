@@ -14,15 +14,22 @@ public class BooksController : ControllerBase
 {
     private readonly AppDbContext _context;
     private readonly FileStorageService _fileService;
-
-    public BooksController(AppDbContext context, FileStorageService fileService)
+    private readonly OpenLibraryService _openLibService;
+    private readonly GoogleBooksService _googleService;
+    public BooksController(
+        AppDbContext context, 
+        FileStorageService fileService, 
+        OpenLibraryService openLibService,
+        GoogleBooksService googleService)  
     {
         _context = context;
         _fileService = fileService;
+        _openLibService = openLibService;
+        _googleService = googleService;
     }
 
     // GET: api/books?q=termo
-    [HttpGet]
+    [HttpGet("local")]
     public async Task<IActionResult> GetBooks([FromQuery] string? q)
     {
         var query = _context.Books.AsQueryable();
@@ -48,13 +55,13 @@ public class BooksController : ControllerBase
             b.PageCount,
             b.Description,
             b.Source,
+            b.Language,
             PdfUrl = b.PdfFilePath != null ? $"{baseUrl}/{b.Id}?type=pdf" : null,
             CoverUrl = b.CoverFilePath != null ? $"{baseUrl}/{b.Id}?type=cover" : null
         });
 
         return Ok(response);
     }
-
     // POST: api/books (Upload)
     [HttpPost]
     public async Task<IActionResult> CreateBook([FromForm] CreateBookDto dto)
@@ -65,7 +72,8 @@ public class BooksController : ControllerBase
             Author = dto.Author,
             Year = dto.Year,
             PageCount = dto.PageCount,
-            Description = dto.Description
+            Description = dto.Description,
+            Language = dto.Language
         };
 
         if (dto.PdfFile != null)
@@ -86,6 +94,7 @@ public class BooksController : ControllerBase
 
     // GET: api/books/download/{id}?type=pdf
     [HttpGet("download/{id}")]
+    [HttpHead("download/{id}")]
     public async Task<IActionResult> DownloadFile(Guid id, [FromQuery] string type)
     {
         var book = await _context.Books.FindAsync(id);
@@ -102,5 +111,51 @@ public class BooksController : ControllerBase
         // Retorna o arquivo como Stream (Eficiente para arquivos grandes)
         var fileStream = new FileStream(physicalPath, FileMode.Open, FileAccess.Read);
         return File(fileStream, contentType, enableRangeProcessing: true); // enableRangeProcessing é ótimo para PDF streaming
+    }
+    
+    // === 2. GET OPEN LIBRARY: api/books/open-library?q=termo&lang=pt&subject=ficcao ===
+    [HttpGet("open-library")]
+    public async Task<IActionResult> GetBooksOpenLibrary(
+        [FromQuery] string? q, 
+        [FromQuery] string? lang, 
+        [FromQuery] string? subject)
+    {
+        // Se não houver filtros, retorna vazio para não sobrecarregar a API
+        if (string.IsNullOrWhiteSpace(q) && string.IsNullOrWhiteSpace(lang) && string.IsNullOrWhiteSpace(subject))
+        {
+            return Ok(new List<BookResponseDto>());
+        }
+
+        // Chama o Service que criamos anteriormente
+        var books = await _openLibService.SearchBooksAsync(q ?? "", lang, subject);
+
+        return Ok(books);
+    }
+    // GET: api/books/open-library/details?id=/works/OL123W
+    [HttpGet("open-library/details")]
+    public async Task<IActionResult> GetBookDetails([FromQuery] string id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+            return BadRequest("O ID do livro é obrigatório.");
+
+        // Chama o serviço
+        var details = await _openLibService.GetBookDetailsAsync(id);
+
+        return Ok(details);
+    }
+    // === 3. GET GOOGLE BOOKS: api/books/google?q=termo ===
+    [HttpGet("google")]
+    public async Task<IActionResult> GetGoogleBooks(
+        [FromQuery] string? q, 
+        [FromQuery] string? lang, 
+        [FromQuery] string? subject)
+    {
+        if (string.IsNullOrWhiteSpace(q) && string.IsNullOrWhiteSpace(subject))
+        {
+             return Ok(new List<BookResponseDto>());
+        }
+
+        var books = await _googleService.SearchBooksAsync(q ?? "", lang, subject);
+        return Ok(books);
     }
 }
