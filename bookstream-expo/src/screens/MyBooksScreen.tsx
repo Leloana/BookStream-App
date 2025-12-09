@@ -6,19 +6,23 @@ import React, { useCallback, useState } from 'react';
 import {
   Alert,
   FlatList,
-  Image,
   Platform,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
+  Linking,
+  RefreshControl // <--- 1. IMPORTADO AQUI
 } from 'react-native';
+import { getInfoAsync } from 'expo-file-system/legacy';
 
 import PageHeader from '../components/PageHeader';
 import { Book } from '../domain/models/Book';
 import { LibraryBook, libraryService } from '../services/libraryService';
 import { storageService } from '../services/storageService';
+import { Image } from 'expo-image';
+import { formatFolderName } from '../services/utils';
 
 const getLangCode = (languages?: string[]) => {
   if (!languages || languages.length === 0) return null;
@@ -38,15 +42,17 @@ const THEME = {
   accent: '#C77D63',
   danger: '#E57373',
   dangerBg: '#FFF0F0',
-  success: '#4CAF50', // Verde para status baixado
+  success: '#4CAF50',
   neutral: '#E0E0E0',
+  webBlue: '#546E7A',
 };
 
-
-// Recebendo navigation via props para poder ir para Details
 export default function MyBooksScreen({ navigation }: any) {
   const [items, setItems] = useState<LibraryBook[]>([]);
   const [loading, setLoading] = useState(false);
+  const [currentFolder, setCurrentFolder] = useState<string>('');
+
+  const blurhash = 'L6PZfSi_.AyE_3t7t7R**0o#DgR4';
 
   useFocusEffect(
     useCallback(() => {
@@ -56,20 +62,76 @@ export default function MyBooksScreen({ navigation }: any) {
 
   async function loadData() {
     setLoading(true);
+    
+    // 1. Carrega dados do banco
     const data = await libraryService.getAllBooks();
     
-    data.sort((a, b) => {
+    // 2. Verifica pasta
+    const folderUri = await storageService.getSavedFolder();
+    if (folderUri) {
+        setCurrentFolder(formatFolderName(folderUri));
+    } else {
+        setCurrentFolder('Não definida');
+    }
+
+    // 3. Auditoria de arquivos
+    const verifiedData = await Promise.all(data.map(async (book) => {
+        if (book.isDownloaded && book.localUri) {
+            try {
+                const info = await getInfoAsync(book.localUri);
+                
+                if (!info.exists) {
+                    throw new Error("Arquivo não existe mais");
+                }
+
+            } catch (e) {
+                console.log(`Arquivo inacessível/deletado: ${book.title}. Resetando status.`);
+                
+                const updatedBook = { ...book, isDownloaded: false, localUri: "" }; // Alterado para null para limpar
+                
+                if (libraryService.updateBookStatus) {
+                    await libraryService.updateBookStatus(updatedBook); 
+                }
+                
+                return updatedBook;
+            }
+        }
+        return book;
+    }));
+
+    verifiedData.sort((a, b) => {
         if (a.isDownloaded && !b.isDownloaded) return -1;
         if (!a.isDownloaded && b.isDownloaded) return 1;
         return (b.downloadedAt || 0) - (a.downloadedAt || 0);
     });
     
-    setItems(data);
+    setItems(verifiedData);
     setLoading(false);
   }
 
+  async function handleChangeFolder() {
+    Alert.alert(
+      'Gerenciar Pasta',
+      'Escolha uma nova pasta.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { 
+          text: 'Selecionar Pasta', 
+          onPress: async () => {
+            try {
+              await storageService.selectFolder();
+              loadData(); 
+            } catch (error) {
+              console.error(error);
+              Alert.alert('Erro', 'Não foi possível ler a pasta selecionada.');
+            }
+          }
+        }
+      ]
+    );
+  }
+
   const handleCardPress = (item: LibraryBook) => {
-    // Passamos o objeto item como 'book' para a tela de detalhes
     navigation.navigate('BookDetails', { book: item });
   };
 
@@ -134,19 +196,112 @@ export default function MyBooksScreen({ navigation }: any) {
   const renderLibraryItem = ({ item }: { item: LibraryBook }) => {
     const langBadge = getLangCode(item.language);
     const isDownloaded = item.isDownloaded && item.localUri;
+    
+    const hasPdf = !!item.pdfUrl;
+    const hasWeb = !!item.readUrl;
 
-return (
-      // 1. Mudei de View para TouchableOpacity no container principal
+    const renderButtons = () => {
+        // CASO 1: BAIXADO
+        if (isDownloaded) {
+            return (
+                <>
+                    <TouchableOpacity 
+                        style={[styles.actionButton, { backgroundColor: '#4CAF50' }]} 
+                        onPress={() => openFile(item)}
+                    >
+                        <Ionicons name="book-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
+                        <Text style={styles.buttonText}>Ler</Text>
+                    </TouchableOpacity>
+        
+                    <TouchableOpacity 
+                        style={styles.deleteButton} 
+                        onPress={() => confirmDelete(item)}
+                    >
+                        <Ionicons name="trash-outline" size={20} color={THEME.danger} />
+                    </TouchableOpacity>
+                </>
+            );
+        }
+
+        // CASO 2: NÃO BAIXADO + PDF
+        if (hasPdf) {
+            return (
+                <>
+                    <TouchableOpacity 
+                        style={styles.downloadButton} 
+                        onPress={() => handleDownloadPress(item)}
+                    >
+                        <Ionicons name="download-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
+                        <Text style={styles.buttonText}>Baixar</Text>
+                    </TouchableOpacity>
+        
+                    <TouchableOpacity 
+                        style={styles.deleteButton} 
+                        onPress={() => handleRemoveFavorite(item.id)}
+                    >
+                        <Ionicons name="heart-dislike-outline" size={20} color={THEME.textLight} />
+                    </TouchableOpacity>
+                </>
+            );
+        }
+
+        // CASO 3: WEB
+        if (hasWeb) {
+            return (
+                <>
+                    <TouchableOpacity 
+                        style={[styles.actionButton, { backgroundColor: THEME.webBlue }]} 
+                        onPress={() => Linking.openURL(item.readUrl!)}
+                    >
+                        <Ionicons name="globe-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
+                        <Text style={styles.buttonText}>Web</Text>
+                    </TouchableOpacity>
+        
+                    <TouchableOpacity 
+                        style={styles.deleteButton} 
+                        onPress={() => handleRemoveFavorite(item.id)}
+                    >
+                        <Ionicons name="heart-dislike-outline" size={20} color={THEME.textLight} />
+                    </TouchableOpacity>
+                </>
+            );
+        }
+
+        // CASO 4: INDISPONÍVEL
+        return (
+            <>
+                <View style={styles.unavailableBadge}>
+                     <Ionicons name="alert-circle-outline" size={16} color={THEME.danger} style={{marginRight: 4}}/>
+                     <Text style={styles.unavailableText}>Indisponível</Text>
+                </View>
+
+                <TouchableOpacity 
+                    style={styles.deleteButton} 
+                    onPress={() => handleRemoveFavorite(item.id)}
+                >
+                    <Ionicons name="trash-outline" size={20} color={THEME.textLight} />
+                </TouchableOpacity>
+            </>
+        );
+    };
+
+    return (
       <TouchableOpacity 
         style={styles.card} 
         onPress={() => handleCardPress(item)}
         activeOpacity={0.7}
       >
-        {/* Capa (mantido igual) */}
         <View style={styles.coverShadow}>
           <View style={styles.coverContainer}>
               {item.coverUrl ? (
-                  <Image source={{ uri: item.coverUrl }} style={styles.cover} />
+                  <Image 
+                    source={item.coverUrl} 
+                    style={styles.cover} 
+                    placeholder={blurhash} 
+                    contentFit="cover"   
+                    transition={500}   
+                    cachePolicy="memory-disk" 
+                  />
               ) : (
                   <View style={[styles.cover, styles.placeholder]}>
                       <Text style={styles.placeholderText}>{item.title[0]}</Text>
@@ -161,7 +316,6 @@ return (
           </View>
         </View>
   
-        {/* Informações */}
         <View style={styles.infoContainer}>
           <View style={styles.textBlock}>
               <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
@@ -182,49 +336,11 @@ return (
               </View>
           </View>
   
-          {/* LÓGICA DE BOTÕES (IMPORTANTE: Mantenha TouchableOpacity aqui dentro) */}
-          {/* O TouchableOpacity interno captura o toque antes do card pai */}
           <View style={styles.actionsRow}>
-              
-              {isDownloaded ? (
-                  <>
-                    <TouchableOpacity 
-                        style={styles.readButton} 
-                        onPress={() => openFile(item)}
-                    >
-                        <Ionicons name="book-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
-                        <Text style={styles.readButtonText}>Ler</Text>
-                    </TouchableOpacity>
-        
-                    <TouchableOpacity 
-                        style={styles.deleteButton} 
-                        onPress={() => confirmDelete(item)}
-                    >
-                        <Ionicons name="trash-outline" size={20} color={THEME.danger} />
-                    </TouchableOpacity>
-                  </>
-              ) : (
-                  <>
-                    <TouchableOpacity 
-                        style={styles.downloadButton} 
-                        onPress={() => handleDownloadPress(item)}
-                    >
-                        <Ionicons name="download-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
-                        <Text style={styles.readButtonText}>Baixar</Text>
-                    </TouchableOpacity>
-        
-                    <TouchableOpacity 
-                        style={styles.deleteButton} 
-                        onPress={() => handleRemoveFavorite(item.id)}
-                    >
-                        <Ionicons name="heart-dislike-outline" size={20} color={THEME.textLight} />
-                    </TouchableOpacity>
-                  </>
-              )}
-
+              {renderButtons()}
           </View>
         </View>
-      </TouchableOpacity> // Fecha o TouchableOpacity do card
+      </TouchableOpacity>
     );
   };
 
@@ -232,17 +348,37 @@ return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.background} />
       
-      {/* Usando o Componente PageHeader para padronizar */}
-      <PageHeader 
-        title="Minha Estante" 
-        subtitle={`${items.length} ${items.length === 1 ? 'item' : 'itens'} na sua biblioteca`} 
-      />
+      <View style={styles.headerContainer}>
+         <View style={{ flex: 1 }}>
+            <PageHeader 
+                title="Minha Estante" 
+                subtitle={`${items.length} ${items.length === 1 ? 'item' : 'itens'} • ${currentFolder}`} 
+            />
+         </View>
+         
+         <TouchableOpacity 
+            style={styles.folderButton} 
+            onPress={handleChangeFolder}
+            activeOpacity={0.6}
+         >
+            <Ionicons name="folder-open-outline" size={24} color={THEME.textDark} />
+         </TouchableOpacity>
+      </View>
 
       <FlatList
         data={items}
         keyExtractor={(item) => item.id}
-        refreshing={loading}
-        onRefresh={loadData}
+        
+        // === ATUALIZAÇÃO DO PULL TO REFRESH ===
+        refreshControl={
+            <RefreshControl
+                refreshing={loading}
+                onRefresh={loadData}
+                colors={[THEME.accent]} // Android
+                tintColor={THEME.accent} // iOS
+            />
+        }
+        
         contentContainerStyle={{ paddingBottom: 20 }}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
@@ -262,6 +398,24 @@ return (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.background },
+
+  headerContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingRight: 20,
+  },
+  folderButton: {
+    marginTop: 53,
+    backgroundColor: '#fff',
+    padding: 10,
+    borderRadius: 50,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
 
   card: {
     flexDirection: 'row',
@@ -297,21 +451,20 @@ const styles = StyleSheet.create({
   title: { fontSize: 16, fontWeight: '700', color: THEME.textDark, marginBottom: 4, lineHeight: 20 },
   author: { fontSize: 14, color: THEME.textLight, marginBottom: 6 },
   
-  // Status Badge Styles
   statusBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start' },
-  statusDownloaded: { backgroundColor: '#E8F5E9' }, // Fundo verde claro
-  statusWishlist: { backgroundColor: '#FFF3E0' },   // Fundo laranja/bege claro
+  statusDownloaded: { backgroundColor: '#E8F5E9' },
+  statusWishlist: { backgroundColor: '#FFF3E0' }, 
   statusText: { fontSize: 10, fontWeight: 'bold' },
 
   actionsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   
-  // Botão LER (Terracota)
-  readButton: { flex: 1, flexDirection: 'row', backgroundColor: THEME.accent, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  
-  // Botão BAIXAR (Cinza Escuro / Preto Suave)
+  actionButton: { flex: 1, flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   downloadButton: { flex: 1, flexDirection: 'row', backgroundColor: THEME.textDark, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   
-  readButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  unavailableBadge: { flex: 1, flexDirection: 'row', backgroundColor: '#FFEBEE', paddingVertical: 10, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#FFCDD2' },
+  unavailableText: { color: '#D32F2F', fontSize: 12, fontWeight: 'bold' },
+
+  buttonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   deleteButton: { width: 40, height: 40, backgroundColor: THEME.dangerBg, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
 
   emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 100, paddingHorizontal: 40 },
