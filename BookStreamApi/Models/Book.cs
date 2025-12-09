@@ -18,8 +18,6 @@ public class Book
     public int? Year { get; set; }
     public int? PageCount { get; set; }
     public string? Description { get; set; }
-    
-
     public string? PdfFilePath { get; set; } 
     public string? CoverFilePath { get; set; }
     public string? Language { get; set; }

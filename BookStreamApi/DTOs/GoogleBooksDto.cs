@@ -57,7 +57,7 @@ public class ImageLinks
 public class AccessInfo
 {
     [JsonPropertyName("webReaderLink")]
-    public string? WebReaderLink { get; set; }
+    public string? ReadUrl { get; set; }
 
     [JsonPropertyName("pdf")]
     public PdfInfo? Pdf { get; set; }
