@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Book } from '../domain/models/Book';
+import { generateFileName } from './utils';
 
 const LIBRARY_KEY = 'MY_LIBRARY_BOOKS'; // Livros baixados (Físicos)
 const FAVORITES_DATA_KEY = 'FAVORITE_BOOKS_DATA'; // Favoritos (Metadados)
@@ -51,6 +52,80 @@ export const libraryService = {
       await AsyncStorage.setItem(LIBRARY_KEY, JSON.stringify(filtered));
     } catch (e) {
       console.error(e);
+    }
+  },
+
+  updateBookStatus: async (updatedBook: LibraryBook) => {
+     try {
+       const books = await libraryService.getBooks();
+       // Substitui o livro antigo pelo atualizado (sem localUri)
+       const newBooksList = books.map(b => b.id === updatedBook.id ? updatedBook : b);
+       
+       await AsyncStorage.setItem(LIBRARY_KEY, JSON.stringify(newBooksList));
+     } catch (e) {
+       console.error("Erro ao atualizar status do livro", e);
+     }
+  },
+
+// Posso usar futuramente
+  resetAllDownloads: async () => {
+    try {
+      const storedBooks = await libraryService.getBooks();
+      
+
+      const booksReset = storedBooks.map(book => ({
+        ...book,
+        localUri: null,
+        isDownloaded: false, 
+      }));
+
+
+      await AsyncStorage.setItem(LIBRARY_KEY, JSON.stringify(booksReset));
+      
+    } catch (e) {
+      console.error("Erro ao resetar downloads:", e);
+    }
+  },
+
+  // Posso usar futuramente
+  syncBooksWithFolder: async (folderUri: string) => {
+    try {
+      const storedBooks = await libraryService.getBooks();
+
+      const { StorageAccessFramework } = require('expo-file-system'); 
+      const existingFiles = await StorageAccessFramework.readDirectoryAsync(folderUri);
+
+      const syncedBooks = storedBooks.map(book => {        
+        const expectedFileName = generateFileName(book.title);
+
+        const foundFileUri = existingFiles.find((uri: string) => {
+            const decodedUri = decodeURIComponent(uri);
+            return decodedUri.endsWith(expectedFileName);
+        });
+
+        if (foundFileUri) {
+          return {
+            ...book,
+            localUri: foundFileUri,
+            isDownloaded: true
+          };
+        } else {
+          return {
+            ...book,
+            localUri: null,
+            isDownloaded: false
+          };
+        }
+      });
+
+      await AsyncStorage.setItem(LIBRARY_KEY, JSON.stringify(syncedBooks));
+      
+      const recoveredCount = syncedBooks.filter(b => b.isDownloaded).length;
+      return recoveredCount;
+
+    } catch (e) {
+      console.error("Erro ao sincronizar pasta:", e);
+      throw new Error("Falha ao ler arquivos da pasta.");
     }
   },
 
