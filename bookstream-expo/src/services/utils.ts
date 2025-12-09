@@ -25,3 +25,24 @@ export const SOURCE_MAP: Record<string, { label: string, color: string, text: st
   local:       { label: 'Servidor Local', color: '#D0E0FF', text: '#003366' },
   default:     { label: 'Acervo',       color: '#F0F0F0', text: '#666' }
 };
+
+export const generateFileName = (title: string) => {
+    const cleanTitle = title.replace(/[^a-z0-9]/gi, '_').substring(0, 50);
+    return `${cleanTitle}.pdf`;
+}
+
+export const formatFolderName = (uri: string) => {
+    try {
+      const decoded = decodeURIComponent(uri);
+      // O Android geralmente retorna algo como ".../tree/primary:Download/Livros"
+      // Vamos tentar pegar só o que vem depois de "primary:" ou da última barra
+      if (decoded.includes('primary:')) {
+        return decoded.split('primary:')[1];
+      }
+      // Fallback para outros tipos de armazenamento
+      const parts = decoded.split(':');
+      return parts.length > 1 ? parts[parts.length - 1] : decoded;
+    } catch {
+      return 'Pasta Personalizada';
+    }
+  };
