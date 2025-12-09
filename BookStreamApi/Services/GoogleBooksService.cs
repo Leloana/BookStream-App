@@ -91,9 +91,7 @@ public class GoogleBooksService
                     Description = info?.Description,
                     Source = "google",
                     PdfUrl = pdfUrl,
-                    // Se não tiver PDF direto, mandamos o link de leitura web
-                    // (Opcional, depende de como seu app lida com isso)
-                    // ReadUrl = access?.WebReaderLink, 
+                    ReadUrl = access?.ReadUrl, 
                     CoverUrl = coverUrl,
                     Language = !string.IsNullOrEmpty(info?.Language) ? new List<string> { info.Language } : null
                 };

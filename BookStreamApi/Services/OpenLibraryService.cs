@@ -67,7 +67,7 @@ public class OpenLibraryService
                         PdfUrl = $"https://archive.org/download/{iaId}/{iaId}.pdf",
                         // Lógica de URL da Capa
                         CoverUrl = doc.CoverI.HasValue 
-                            ? $"https://covers.openlibrary.org/b/id/{doc.CoverI}-L.jpg" 
+                            ? $"https://covers.openlibrary.org/b/id/{doc.CoverI}.jpg" 
                             : null,
                         Language = doc.Language,
                         Description = "Detalhes disponíveis via clique" // OpenLibrary Search não retorna descrição completa
@@ -147,6 +147,7 @@ public class BookResponseDto
     public string? Description { get; set; }
     public string Source { get; set; }
     public string? PdfUrl { get; set; }
+    public string? ReadUrl { get; set; }
     public string? CoverUrl { get; set; }
     public List<string>? Language { get; set; }
 }
