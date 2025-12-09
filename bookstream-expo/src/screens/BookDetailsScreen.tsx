@@ -24,7 +24,7 @@ import { preferencesService } from '../services/preferencesService';
 import { storageService } from '../services/storageService';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as Sharing from 'expo-sharing';
-import { getLangCode } from '../services/utils';
+import { generateFileName, getLangCode } from '../services/utils';
 import { SOURCE_MAP } from '../services/utils';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'BookDetails'>;
@@ -147,12 +147,34 @@ export default function BookDetailsScreen({ route }: Props) {
 
   async function handleDownloadAndRead() {
        if (!book.pdfUrl) return;
+
        const cleanTitle = book.title.replace(/[^a-z0-9]/gi, '_');
-       const fileNameWithExt = `${cleanTitle}.pdf`;
+       const fileNameWithExt = generateFileName(book.title);
        try {
          setDownloading(true);
          let folderUri = await storageService.getSavedFolder();
-         if (!folderUri) return;
+
+         if (!folderUri) {
+            Alert.alert(
+                "Configuração Necessária",
+                "Para baixar livros, precisamos que você escolha uma pasta no seu dispositivo onde eles serão salvos.",
+                [
+                    { text: "Cancelar", style: "cancel", onPress: () => setDownloading(false) },
+                    { 
+                        text: "Escolher Pasta", 
+                        onPress: async () => {
+                            const newFolder = await storageService.selectFolder();
+                            if (newFolder) {
+                                handleDownloadAndRead(); 
+                            } else {
+                                setDownloading(false); 
+                            }
+                        }
+                    }
+                ]
+            );
+            return; 
+        }
          const alreadyExists = await storageService.checkForDuplicate(fileNameWithExt);
          if (alreadyExists) {
            setDownloading(false);
