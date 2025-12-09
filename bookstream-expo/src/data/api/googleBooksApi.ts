@@ -18,6 +18,7 @@ interface BookResponseDto {
   description?: string;
   source: 'local' | 'openlibrary' | 'google'; // Adicionado 'google'
   pdfUrl?: string;
+  readUrl?: string;
   coverUrl?: string;
   language?: string[];
 }
@@ -43,10 +44,9 @@ export async function searchGoogleBooks(query: string, filters?: SearchFilters):
       pdfUrl: dto.pdfUrl || '',
       language: dto.language,
       source: 'google',
-      description: dto.description
-      // readUrl: Se você mapeou isso no DTO, adicione aqui
+      description: dto.description,
+      readUrl: dto.readUrl || '',
     } as Book));
-
   } catch (error) {
     console.error('Erro ao buscar Google Books via Backend:', error);
     return [];

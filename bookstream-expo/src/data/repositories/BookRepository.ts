@@ -87,7 +87,7 @@ export const BookRepository = {
 
       const allBooks = resultsMatrix.flat();
       
-      return shuffleArray(allBooks);
+      return allBooks;
 
     } catch (e) {
       console.error("Erro no repositório (searchAll):", e);
@@ -95,7 +95,7 @@ export const BookRepository = {
     }
   },
 
-  getBooksBySubject: async (subject: string): Promise<Book[]> => {
+  getBooksBySubject: async (subject: string, limit: number = 10): Promise<Book[]> => {
     try {
       const [openLibResults, googleResults] = await Promise.all([
         searchOpenLibrary('', { subject: subject }), 
@@ -105,17 +105,18 @@ export const BookRepository = {
 
       const allBooks = [...googleResults, ...openLibResults];
       
-      const unique = deduplicateBooks(allBooks);
-      return shuffleArray(unique).slice(0, 15); 
+ 
+      return allBooks.slice(0, limit);
 
     } catch (e) {
       console.error(`Erro no repositório (subject: ${subject}):`, e);
       return [];
     }
   },
+  
 
 
-  getMixedRecommendations: async (tags: string[]): Promise<Book[]> => {
+  getMixedRecommendations: async (tags: string[], limit: number = 10): Promise<Book[]> => {
     if (tags.length === 0) return [];
 
     try {
@@ -131,17 +132,16 @@ export const BookRepository = {
              searchOpenLibrary(openLibQuery),
              searchGoogleBooks(googleQuery)
         ]);
-
-        return [...gb, ...ol];
+        const allBooks = [...gb, ...ol];
+        
+        return allBooks.slice(0, limit);
       });
 
       const resultsMatrix = await Promise.all(promises);
       
       const allBooks = resultsMatrix.flat();
 
-      const uniqueBooks = deduplicateBooks(allBooks);
-
-      return shuffleArray(uniqueBooks).slice(0, 20);
+      return allBooks.slice(0, limit);
 
     } catch (e) {
       console.error("Erro no repositório (recommendations):", e);
