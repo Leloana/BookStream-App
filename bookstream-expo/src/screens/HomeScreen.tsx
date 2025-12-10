@@ -1,230 +1,290 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useFocusEffect } from '@react-navigation/native'; // Importante
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Keyboard,
-  LayoutAnimation,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
-  ScrollView // Import ScrollView
+  BackHandler,
+  RefreshControl
 } from 'react-native';
+
+// Imports do Projeto
 import { RootStackParamList } from '../AppNavigator';
-import BookCard from '../components/BookCard';
-import PageHeader from '../components/PageHeader';
 import SearchBar from '../components/SearchBar';
+import GridBookItem from '../components/GridBookItem'; // <--- IMPORTADO
 import { BookRepository } from '../data/repositories/BookRepository';
 import { Book } from '../domain/models/Book';
-
-// Importe seu serviço de biblioteca
-import { libraryService, LibraryBook } from '../services/libraryService';
+import { LibraryBook, libraryService } from '../services/libraryService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MainTabs'>;
 
-// Filtros Simplificados
-const LANGUAGES = [
-  { label: 'Todos', value: null },
-  { label: 'PT', value: 'pt' }, // Backend usa 'pt'
-  { label: 'EN', value: 'en' },
-  { label: 'ES', value: 'es' },
-  { label: 'FR', value: 'fr' },
-];
-
-const SOURCES = [
-  { label: 'Todas', value: null },
-  { label: 'Local', value: 'local' },
-  { label: 'OpenLib', value: 'openlibrary' },
-  { label: 'Google', value: 'google' },
-];
+// Mantemos as constantes aqui também para configurar o espaçamento da FlatList
+const ITEM_SPACING = 8; 
+const SCREEN_PADDING = 16;
 
 const THEME = {
-  background: '#FAF9F6',
-  textDark: '#2C2C2C',
-  textLight: '#666666',
+  background: '#FFFFFF',
+  textDark: '#262626',
   accent: '#C77D63',
-  border: '#E0D6CC',
+  placeholder: '#DBDBDB',
 };
 
-// Componente de Filtro Compacto (Bolinha)
-const FilterBadge = ({ label, selected, onPress }: { label: string, selected: boolean, onPress: () => void }) => (
-  <TouchableOpacity
-    style={[styles.filterBadge, selected && styles.filterBadgeSelected]}
-    onPress={onPress}
-    activeOpacity={0.7}
-  >
-    <Text style={[styles.filterText, selected && styles.filterTextSelected]}>
-      {label}
-    </Text>
-  </TouchableOpacity>
-);
-
 export default function HomeScreen({ navigation }: any) {
+  // ESTADOS PRINCIPAIS
+  const [viewMode, setViewMode] = useState<'feed' | 'searching' | 'results'>('feed');
   const [query, setQuery] = useState('');
-  const [books, setBooks] = useState<Book[]>([]);
+  
+  const [refreshing, setRefreshing] = useState(false);
+  // DADOS
+  const [feedBooks, setFeedBooks] = useState<Book[]>([]); 
+  const [resultBooks, setResultBooks] = useState<Book[]>([]); 
+  const [recentSearches, setRecentSearches] = useState<string[]>([]); 
+  
+  // CONTROLE
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Estados dos Filtros
-  const [selectedLang, setSelectedLang] = useState<string | null>(null);
-  const [selectedSource, setSelectedSource] = useState<string | null>(null);
-  const [showFilters, setShowFilters] = useState(false);
-
-  // Estado Local da Biblioteca (Para saber se baixou ou favoritou)
-  // Usamos um Map para busca rápida O(1) pelo ID
+  const [feedPage, setFeedPage] = useState(0); 
   const [libraryStatus, setLibraryStatus] = useState<Record<string, LibraryBook>>({});
 
-  // 1. CARREGA STATUS DA BIBLIOTECA AO ENTRAR NA TELA
+  // 1. CARREGA STATUS E BACK HANDLER
   useFocusEffect(
     useCallback(() => {
       loadLibraryStatus();
-    }, [])
+      
+      const onBackPress = () => {
+          if (viewMode !== 'feed') {
+              handleCancelSearch();
+              return true;
+          }
+          return false;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+
+    }, [viewMode])
   );
 
+  // 2. CARREGA O FEED INICIAL
+  useEffect(() => {
+      loadMoreFeed();
+  }, []);
+
   async function loadLibraryStatus() {
-    // Pega todos os livros (baixados + favoritos)
     const allBooks = await libraryService.getAllBooks();
-    
-    // Transforma num Dicionário: { "id_do_livro": ObjetoLivro }
     const statusMap: Record<string, LibraryBook> = {};
-    allBooks.forEach(b => {
-        statusMap[b.id] = b;
-    });
-    
+    allBooks.forEach(b => statusMap[b.id] = b);
     setLibraryStatus(statusMap);
   }
 
-  async function handleSearch() {
-    Keyboard.dismiss();
-    if (!query.trim() && !selectedLang && !selectedSource) return;
+  const handleRefresh = async () => {
+      // Só faz sentido atualizar se estiver no modo Feed
+      if (viewMode !== 'feed') return;
 
-    try {
+      setRefreshing(true);
+
+      try {
+          // Lógica similar ao loadMoreFeed, mas para SUBSTITUIR os dados
+          const topics = ['ficção', 'tecnologia', 'história', 'arte', 'ciência', 'brasil', 'biografia', 'negócios'];
+          const randomTopic = topics[Math.floor(Math.random() * topics.length)];
+          
+          const newBooks = await BookRepository.searchAll(randomTopic);
+          
+          // Embaralha
+          const shuffled = newBooks.sort(() => 0.5 - Math.random());
+          
+          // AQUI É A DIFERENÇA: Substituímos o estado em vez de adicionar
+          setFeedBooks(shuffled);
+          setFeedPage(1); // Reseta a paginação
+          
+      } catch (error) {
+          console.log("Erro ao atualizar feed", error);
+      } finally {
+          setRefreshing(false);
+      }
+  };
+
+  // --- LÓGICA DO FEED INFINITO ---
+  async function loadMoreFeed() {
+      if (loading && viewMode === 'feed') return;
+      
+      try {
+          if(feedBooks.length === 0) setLoading(true); 
+          
+          const topics = ['ficção', 'tecnologia', 'história', 'arte', 'ciência', 'brasil'];
+          const randomTopic = topics[Math.floor(Math.random() * topics.length)];
+          
+          const newBooks = await BookRepository.searchAll(randomTopic);
+          
+          const shuffled = newBooks.sort(() => 0.5 - Math.random());
+          
+          setFeedBooks(prev => {
+              const existingIds = new Set(prev.map(b => b.id));
+              const uniqueNew = shuffled.filter(b => !existingIds.has(b.id));
+              return [...prev, ...uniqueNew];
+          });
+          
+          setFeedPage(p => p + 1);
+      } catch (error) {
+          console.log("Erro ao carregar feed", error);
+      } finally {
+          setLoading(false);
+      }
+  }
+
+  // --- LÓGICA DE BUSCA ---
+  const handleFocus = () => {
+      setViewMode('searching');
+  };
+
+  const handleCancelSearch = () => {
+      Keyboard.dismiss();
+      setQuery('');
+      setViewMode('feed');
+      setResultBooks([]);
+  };
+
+  const handleSearchSubmit = async (textToSearch = query) => {
+      if (!textToSearch.trim()) return;
+      
+      Keyboard.dismiss();
+      setQuery(textToSearch);
       setLoading(true);
-      setError(null);
-      
-      const result = await BookRepository.searchAll(query, {
-        language: selectedLang || undefined,
-        source: selectedSource || undefined,
-      });
-      
-      setBooks(result);
-    } catch (e) {
-      console.error(e);
-      setError('Não foi possível realizar a busca.');
-    } finally {
-      setLoading(false);
-    }
-  }
+      setViewMode('results');
 
-  // 2. FUNÇÃO DE FAVORITAR DIRETO DA LISTA
-  async function handleToggleFavorite(book: Book) {
-    // Chama o serviço
-    const newStatus = await libraryService.toggleFavorite(book);
-    
-    // Atualiza o estado local IMEDIATAMENTE para o usuário ver a cor mudar
-    setLibraryStatus(prev => {
-        const current = prev[book.id] || { ...book, isDownloaded: false, isFavorite: false };
-        return {
-            ...prev,
-            [book.id]: { ...current, isFavorite: newStatus }
-        };
-    });
-  }
+      if (!recentSearches.includes(textToSearch)) {
+          setRecentSearches(prev => [textToSearch, ...prev].slice(0, 5));
+      }
 
-  const toggleFiltersVisibility = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setShowFilters(!showFilters);
+      try {
+          const results = await BookRepository.searchAll(textToSearch);
+          setResultBooks(results);
+      } catch (error) {
+          console.error(error);
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const handleRemoveRecent = (term: string) => {
+      setRecentSearches(prev => prev.filter(t => t !== term));
+  };
+
+  // --- RENDERIZADORES ---
+  const renderGridItem = ({ item }: { item: Book }) => {
+      const isFavorite = libraryStatus[item.id]?.isFavorite || false;
+      return (
+          <GridBookItem 
+              book={item} 
+              isFavorite={isFavorite}
+              onPress={() => navigation.navigate('BookDetails', { book: item })}
+          />
+      );
   };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.background} />
 
-      <PageHeader 
-        title="Explorar" 
-        subtitle="O mundo inteiro em páginas." 
-      />
+      {/* HEADER: BARRA DE BUSCA FIXA */}
+      <View style={styles.headerContainer}>
+          <View style={{flex: 1}}>
+            <SearchBar
+                value={query}
+                onChangeText={setQuery}
+                onSubmit={() => handleSearchSubmit()}
+                onToggleFilters={() => {}}
+                filtersActive={false}
+                onFocus={handleFocus}
+            />
+          </View>
+          
+          {viewMode !== 'feed' && (
+              <TouchableOpacity onPress={handleCancelSearch} style={styles.cancelButton}>
+                  <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+          )}
+      </View>
 
-      {/* BARRA DE BUSCA */}
-      <SearchBar
-        value={query}
-        onChangeText={setQuery}
-        onSubmit={handleSearch}
-        onToggleFilters={toggleFiltersVisibility}
-        filtersActive={!!selectedLang || !!selectedSource}
-      />
+      {/* CONTEÚDO PRINCIPAL */}
+      {viewMode === 'searching' && query.length === 0 ? (
+          // --- MODO: HISTÓRICO RECENTE ---
+          <View style={styles.historyContainer}>
+              <View style={styles.historyHeader}>
+                  <Text style={styles.historyTitle}>Recentes</Text>
+                  {recentSearches.length > 0 && (
+                       <TouchableOpacity onPress={() => setRecentSearches([])}>
+                           <Text style={styles.clearHistory}>Limpar tudo</Text>
+                       </TouchableOpacity>
+                  )}
+              </View>
+              
+              {recentSearches.map((term, index) => (
+                  <TouchableOpacity 
+                    key={index} 
+                    style={styles.historyItem}
+                    onPress={() => handleSearchSubmit(term)}
+                  >
+                      <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                          <Ionicons name="time-outline" size={20} color="#999" style={{marginRight: 10}} />
+                          <Text style={styles.historyText}>{term}</Text>
+                      </View>
+                      <TouchableOpacity onPress={() => handleRemoveRecent(term)} style={{padding: 5}}>
+                          <Ionicons name="close" size={18} color="#999" />
+                      </TouchableOpacity>
+                  </TouchableOpacity>
+              ))}
+              
+              {recentSearches.length === 0 && (
+                  <Text style={styles.emptyHistoryText}>Sem buscas recentes</Text>
+              )}
+          </View>
+      ) : (
+          // --- MODO: FEED OU RESULTADOS (GRID) ---
+          <FlatList
+            data={viewMode === 'results' ? resultBooks : feedBooks}
+            keyExtractor={(item) => item.id}
+            numColumns={3}
+            renderItem={renderGridItem}
+            
+            // Layout do Grid
+            columnWrapperStyle={styles.columnWrapper}
+            contentContainerStyle={styles.flatListContent}
+            
+            // Scroll Infinito
+            onEndReached={viewMode === 'feed' ? loadMoreFeed : null}
+            onEndReachedThreshold={0.5}
 
-      {/* FILTROS COMPACTOS (Expandível) */}
-      {showFilters && (
-        <View style={styles.filtersWrapper}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow}>
-                <Text style={styles.filterTitle}>Fonte:</Text>
-                {SOURCES.map(source => (
-                    <FilterBadge 
-                        key={source.label} 
-                        label={source.label} 
-                        selected={selectedSource === source.value}
-                        onPress={() => setSelectedSource(source.value)}
-                    />
-                ))}
-            </ScrollView>
-
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow}>
-                <Text style={styles.filterTitle}>Idioma:</Text>
-                {LANGUAGES.map(lang => (
-                    <FilterBadge 
-                        key={lang.label} 
-                        label={lang.label} 
-                        selected={selectedLang === lang.value}
-                        onPress={() => setSelectedLang(lang.value)}
-                    />
-                ))}
-            </ScrollView>
-        </View>
-      )}
-
-      {loading && <ActivityIndicator size="large" color={THEME.accent} style={{ marginTop: 20 }} />}
-
-      {error && (
-        <View style={styles.errorContainer}>
-            <Ionicons name="alert-circle-outline" size={24} color="#E57373" />
-            <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-
-      <FlatList
-        data={books}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => {
-            // Checa no mapa se esse livro já existe na biblioteca
-            const savedState = libraryStatus[item.id];
-            const isFav = savedState?.isFavorite || false;
-            const isDown = savedState?.isDownloaded || false;
-
-            return (
-                <BookCard
-                    book={item}
-                    isFavorite={isFav}
-                    isDownloaded={isDown}
-                    onToggleFavorite={() => handleToggleFavorite(item)}
-                    onPress={() => navigation.navigate('BookDetails', { book: item })}
+            refreshControl={
+                <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={handleRefresh}
+                    colors={[THEME.accent]} // Cor do spinner no Android
+                    tintColor={THEME.accent} // Cor do spinner no iOS
+                    enabled={viewMode === 'feed'} // Só permite puxar se estiver no feed
                 />
-            );
-        }}
-        initialNumToRender={8}
-        contentContainerStyle={{ paddingBottom: 20, paddingTop: 5 }}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={!loading ? (
-            <View style={styles.emptyContainer}>
-                <Ionicons name="search-outline" size={48} color="#D1C4E9" />
-                <Text style={styles.emptyText}>Busque por título, autor ou assunto.</Text>
-            </View>
-        ) : null}
-      />
+            }
+            
+            // Footer & Empty
+            ListFooterComponent={loading ? <ActivityIndicator size="small" color={THEME.accent} style={{margin: 20}} /> : null}
+            ListEmptyComponent={!loading ? (
+                <View style={styles.emptyContainer}>
+                    <Ionicons name="images-outline" size={48} color="#E0E0E0" />
+                    <Text style={styles.emptyText}>
+                        {viewMode === 'results' ? 'Nenhum livro encontrado.' : 'Carregando sugestões...'}
+                    </Text>
+                </View>
+            ) : null}
+            
+            showsVerticalScrollIndicator={false}
+          />
+      )}
     </View>
   );
 }
@@ -232,51 +292,85 @@ export default function HomeScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.background },
   
-  filtersWrapper: {
-    backgroundColor: '#fff',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEE',
+  // Header
+  headerContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: THEME.background,
+      zIndex: 10,
+      marginTop: 15,
   },
-  filtersRow: {
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  filterTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#999',
-    marginRight: 8,
-  },
-  filterBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#F5F5F5',
-    marginRight: 6,
-    borderWidth: 1,
-    borderColor: '#EEE',
-  },
-  filterBadgeSelected: {
-    backgroundColor: THEME.accent,
-    borderColor: THEME.accent,
-  },
-  filterText: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '500',
-  },
-  filterTextSelected: {
-    color: '#fff',
-    fontWeight: '700',
+  cancelButton: {
+      marginTop: 15,
+      marginRight: 10,       
+      width: 40,  
+      height: 40,  
+      borderRadius: 12, 
+      backgroundColor: '#E53935',
+      justifyContent: 'center', 
+      alignItems: 'center',     
+      
+      // Sombra suave
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.2,
+      shadowRadius: 3,
+      elevation: 4,
   },
 
-  errorContainer: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 20, gap: 8,
+  // Layout da Lista
+  flatListContent: {
+      paddingHorizontal: SCREEN_PADDING,
+      paddingBottom: 20,
+      paddingTop: 10,
   },
-  errorText: { color: '#E57373', fontSize: 14 },
-  
-  emptyContainer: { alignItems: 'center', marginTop: 80, paddingHorizontal: 40 },
-  emptyText: { textAlign: 'center', color: THEME.textLight, marginTop: 10 },
+  columnWrapper: {
+      gap: ITEM_SPACING,
+      marginBottom: 16, 
+  },
+
+  // Histórico
+  historyContainer: {
+      padding: 16,
+  },
+  historyHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 16,
+  },
+  historyTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: THEME.textDark,
+  },
+  clearHistory: {
+      fontSize: 12,
+      color: '#0095F6',
+  },
+  historyItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 12,
+  },
+  historyText: {
+      fontSize: 14,
+      color: '#262626',
+  },
+  emptyHistoryText: {
+      color: '#999',
+      textAlign: 'center',
+      marginTop: 20,
+  },
+
+  // Empty State
+  emptyContainer: {
+      alignItems: 'center',
+      marginTop: 100,
+  },
+  emptyText: {
+      color: '#999',
+      marginTop: 10,
+  },
 });
