@@ -84,5 +84,41 @@ export const storageService = {
 
   deleteFile: async (fileUri: string) => {
     await deleteAsync(fileUri);
+  },
+
+  getFolderFileMap: async (): Promise<Record<string, string>> => {
+    const folderUri = await storageService.getSavedFolder();
+    if (!folderUri) return {};
+
+    try {
+      // Lê todos os arquivos da pasta
+      const uris = await StorageAccessFramework.readDirectoryAsync(folderUri);
+      
+      const fileMap: Record<string, string> = {};
+
+      uris.forEach((uri) => {
+        // Decodifica a URI para pegar o nome real
+        const decodedUri = decodeURIComponent(uri);
+        // O nome do arquivo geralmente é a última parte após o último '/'
+        const fileName = decodedUri.split('/').pop();
+        
+        if (fileName) {
+          fileMap[fileName] = uri;
+        }
+      });
+
+      return fileMap;
+    } catch (e) {
+      console.error("Erro ao mapear pasta:", e);
+      // Se der erro de permissão (pasta não existe mais), reseta a pasta
+      await AsyncStorage.removeItem(FOLDER_KEY); 
+      return {};
+    }
+  },
+
+  // Helper para extrair nome limpo de uma URI (caso precise fora)
+  getFileNameFromUri: (uri: string) => {
+      const decoded = decodeURIComponent(uri);
+      return decoded.split('/').pop() || '';
   }
 };
