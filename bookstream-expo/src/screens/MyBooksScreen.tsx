@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as Sharing from 'expo-sharing';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -23,16 +23,9 @@ import { LibraryBook, libraryService } from '../services/libraryService';
 import { storageService } from '../services/storageService';
 import { Image } from 'expo-image';
 import { formatFolderName } from '../services/utils';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-const getLangCode = (languages?: string[]) => {
-  if (!languages || languages.length === 0) return null;
-  const code = languages[0].toLowerCase();
-  if (code.includes('por')) return 'PT';
-  if (code.includes('eng')) return 'EN';
-  if (code.includes('spa')) return 'ES';
-  if (code.includes('fre')) return 'FR';
-  return code.substring(0, 2).toUpperCase();
-};
+import { getLangCode } from '../services/utils';
 
 const THEME = {
   background: '#FAF9F6',
@@ -63,49 +56,20 @@ export default function MyBooksScreen({ navigation }: any) {
   async function loadData() {
     setLoading(true);
     
-    // 1. Carrega dados do banco
-    const data = await libraryService.getAllBooks();
-    
-    // 2. Verifica pasta
+    // Verifica nome da pasta para UI
     const folderUri = await storageService.getSavedFolder();
-    if (folderUri) {
-        setCurrentFolder(formatFolderName(folderUri));
+    setCurrentFolder(folderUri ? formatFolderName(folderUri) : 'Não definida');
+
+    if (!folderUri) {
+        // Se não tem pasta, carrega o método antigo ou pede pasta
+        const data = await libraryService.getAllBooks(); // Fallback
+        setItems(data);
     } else {
-        setCurrentFolder('Não definida');
+        // CHAMA A NOVA SINCRONIZAÇÃO
+        const syncedData = await libraryService.syncFileSystemWithStore();
+        setItems(syncedData);
     }
-
-    // 3. Auditoria de arquivos
-    const verifiedData = await Promise.all(data.map(async (book) => {
-        if (book.isDownloaded && book.localUri) {
-            try {
-                const info = await getInfoAsync(book.localUri);
-                
-                if (!info.exists) {
-                    throw new Error("Arquivo não existe mais");
-                }
-
-            } catch (e) {
-                console.log(`Arquivo inacessível/deletado: ${book.title}. Resetando status.`);
-                
-                const updatedBook = { ...book, isDownloaded: false, localUri: "" }; // Alterado para null para limpar
-                
-                if (libraryService.updateBookStatus) {
-                    await libraryService.updateBookStatus(updatedBook); 
-                }
-                
-                return updatedBook;
-            }
-        }
-        return book;
-    }));
-
-    verifiedData.sort((a, b) => {
-        if (a.isDownloaded && !b.isDownloaded) return -1;
-        if (!a.isDownloaded && b.isDownloaded) return 1;
-        return (b.downloadedAt || 0) - (a.downloadedAt || 0);
-    });
     
-    setItems(verifiedData);
     setLoading(false);
   }
 
@@ -131,8 +95,17 @@ export default function MyBooksScreen({ navigation }: any) {
     );
   }
 
+  // REQUISITO 5: Editar Livro Local
   const handleCardPress = (item: LibraryBook) => {
-    navigation.navigate('BookDetails', { book: item });
+    if (item.isLocalOnly) {
+        // Navega para tela de detalhes passando param que permite edição
+        navigation.navigate('BookDetails', { 
+            book: item, 
+            allowEdit: true // <--- Você precisará tratar isso na BookDetails
+        });
+    } else {
+        navigation.navigate('BookDetails', { book: item });
+    }
   };
 
   async function openFile(book: LibraryBook) {
@@ -196,7 +169,8 @@ export default function MyBooksScreen({ navigation }: any) {
   const renderLibraryItem = ({ item }: { item: LibraryBook }) => {
     const langBadge = getLangCode(item.language);
     const isDownloaded = item.isDownloaded && item.localUri;
-    
+    const isLocalOnly = item.isLocalOnly;
+
     const hasPdf = !!item.pdfUrl;
     const hasWeb = !!item.readUrl;
 
@@ -319,9 +293,19 @@ export default function MyBooksScreen({ navigation }: any) {
         <View style={styles.infoContainer}>
           <View style={styles.textBlock}>
               <Text style={styles.title} numberOfLines={2}>{item.title}</Text>
-              <Text style={styles.author} numberOfLines={1}>
-                  {item.author || 'Autor desconhecido'}
-              </Text>
+
+              {isLocalOnly ? (
+                  <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 6}}>
+                     <MaterialCommunityIcons name="file-document-edit-outline" size={14} color={THEME.accent} />
+                     <Text style={[styles.author, {marginBottom: 0, marginLeft: 4, color: THEME.accent, fontWeight: 'bold'}]}>
+                        Arquivo Local (Editável)
+                     </Text>
+                  </View>
+              ) : (
+                  <Text style={styles.author} numberOfLines={1}>
+                      {item.author || 'Autor desconhecido'}
+                  </Text>
+              )}
               
               <View style={[styles.statusBadge, isDownloaded ? styles.statusDownloaded : styles.statusWishlist]}>
                   <Ionicons 
@@ -351,7 +335,7 @@ export default function MyBooksScreen({ navigation }: any) {
       <View style={styles.headerContainer}>
          <View style={{ flex: 1 }}>
             <PageHeader 
-                title="Minha Estante" 
+                title="BookStream" 
                 subtitle={`${items.length} ${items.length === 1 ? 'item' : 'itens'} • ${currentFolder}`} 
             />
          </View>
