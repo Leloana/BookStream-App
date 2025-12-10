@@ -259,7 +259,7 @@ export default function DiscoverScreen({ navigation }: any) {
         ListHeaderComponent={
             <PageHeader 
                 title="Descobrir" 
-                subtitle="Encontre sua próxima história favorita." 
+                subtitle="Encontre sua próxima história." 
             />
         }
         
