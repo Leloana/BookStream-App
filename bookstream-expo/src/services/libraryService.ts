@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Book } from '../domain/models/Book';
 import { generateFileName } from './utils';
+import { storageService } from './storageService';
 
 const LIBRARY_KEY = 'MY_LIBRARY_BOOKS'; // Livros baixados (Físicos)
 const FAVORITES_DATA_KEY = 'FAVORITE_BOOKS_DATA'; // Favoritos (Metadados)
@@ -11,6 +12,7 @@ export interface LibraryBook extends Book {
   downloadedAt?: number; 
   isDownloaded?: boolean; 
   isFavorite?: boolean;  
+  isLocalOnly?: boolean;
 }
 
 export const libraryService = {
@@ -210,5 +212,144 @@ export const libraryService = {
       console.error("Erro no getAllBooks", e);
       return [];
     }
-  }
+  },
+  updateBookMetadata: async (bookId: string, newMetadata: Partial<Book>) => {
+      try {
+          const books = await libraryService.getBooks();
+          const updatedList = books.map(b => {
+              if (b.id === bookId) {
+                  return { ...b, ...newMetadata };
+              }
+              return b;
+          });
+          await AsyncStorage.setItem(LIBRARY_KEY, JSON.stringify(updatedList));
+      } catch (e) {
+          console.error("Erro ao editar livro", e);
+      }
+  },
+
+  // === A GRANDE FUNÇÃO DE SINCRONIZAÇÃO ===
+// No arquivo libraryService.ts
+
+  syncFileSystemWithStore: async (): Promise<LibraryBook[]> => {
+    try {
+      // 1. Carrega as listas separadas
+      const storedDownloads = await libraryService.getBooks(); // Livros que o app ACHA que estão baixados
+      const favoritesList = await libraryService._getFavoriteBooksData(); // Lista de desejos
+      
+      // 2. Mapeia a realidade da pasta
+      const fileMap = await storageService.getFolderFileMap();
+      const usedFileNames = new Set<string>();
+
+      // === ETAPA A: Limpeza dos Downloads (LIBRARY_KEY) ===
+      // Vamos criar uma nova lista apenas com o que realmente existe na pasta
+      const validDownloads: LibraryBook[] = [];
+
+      for (const book of storedDownloads) {
+        if (book.localUri) {
+             const currentFileName = storageService.getFileNameFromUri(book.localUri);
+             
+             if (fileMap[currentFileName]) {
+                 // ARQUIVO EXISTE: Mantém na lista de downloads
+                 validDownloads.push({
+                     ...book,
+                     localUri: fileMap[currentFileName], // Atualiza URI
+                     isDownloaded: true
+                 });
+                 usedFileNames.add(currentFileName);
+             } else {
+                 // ARQUIVO NÃO EXISTE:
+                 // Simplesmente ignoramos. Ele não entra no validDownloads.
+                 // Se ele for favorito, será re-adicionado na Etapa C vindo da lista de favoritos.
+                 console.log(`Arquivo sumiu: ${book.title} - Removendo dos downloads.`);
+             }
+        }
+      }
+
+      // === ETAPA B: Descobrir Novos Arquivos Locais ===
+      const fileNamesInFolder = Object.keys(fileMap);
+      for (const fileName of fileNamesInFolder) {
+          if (!usedFileNames.has(fileName)) {
+              // Arquivo novo (colocado manualmente na pasta)
+              const newLocalBook: LibraryBook = {
+                  id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                  title: fileName.replace('.pdf', '').replace(/_/g, ' '),
+                  author: 'Arquivo Local',
+                  coverUrl: undefined,
+                  source: 'local',
+                  localUri: fileMap[fileName],
+                  isDownloaded: true,
+                  downloadedAt: Date.now(),
+                  isLocalOnly: true,
+                  description: 'Arquivo detectado na pasta sincronizada.'
+              };
+              validDownloads.push(newLocalBook);
+          }
+      }
+
+      // SALVA O ESTADO LIMPO DOS DOWNLOADS
+      // Aqui garantimos que o storage LIBRARY_KEY só tem o que existe fisicamente
+      await AsyncStorage.setItem(LIBRARY_KEY, JSON.stringify(validDownloads));
+
+
+      // === ETAPA C: Mesclagem para Exibição (O "Pulo do Gato") ===
+      // Agora montamos a lista visual juntando Favoritos + Downloads Válidos
+      
+      const displayMap = new Map<string, LibraryBook>();
+
+      // 1. Adiciona TODOS os favoritos primeiro (Assumindo não baixado)
+      favoritesList.forEach(fav => {
+          displayMap.set(fav.id, { 
+              ...fav, 
+              isDownloaded: false, 
+              localUri: undefined,
+              isFavorite: true 
+          });
+      });
+
+      // 2. Sobrepõe com os Downloads Válidos
+      // Se o livro já estava no mapa (era favorito), ele é atualizado para isDownloaded = true
+      // Se não estava (era só um download ou arquivo local), ele é criado
+      validDownloads.forEach(downloadedBook => {
+          const isFav = displayMap.has(downloadedBook.id); // Checa se já estava na lista de favoritos
+          
+          displayMap.set(downloadedBook.id, {
+              ...downloadedBook,
+              isFavorite: isFav, // Mantém o status de favorito se já existia
+              isDownloaded: true
+          });
+      });
+
+      // 3. Converte o Mapa para Array e Ordena
+      const finalDisplayList = Array.from(displayMap.values());
+
+      finalDisplayList.sort((a, b) => {
+        // Prioridade 1: Baixados aparecem antes
+        if (a.isDownloaded && !b.isDownloaded) return -1;
+        if (!a.isDownloaded && b.isDownloaded) return 1;
+        
+        // Prioridade 2: Mais recentes primeiro
+        return (b.downloadedAt || 0) - (a.downloadedAt || 0);
+      });
+
+      return finalDisplayList;
+
+    } catch (e) {
+      console.error("Erro no sync:", e);
+      return [];
+    }
+  },
+  emergencyReset: async () => {
+    try {
+      console.log("Iniciando limpeza de emergência...");
+      await AsyncStorage.removeItem(LIBRARY_KEY);       // Remove livros salvos
+      await AsyncStorage.removeItem(FAVORITES_DATA_KEY); // Remove favoritos
+      // Se quiser resetar a pasta escolhida também, descomente a linha abaixo:
+      // await AsyncStorage.removeItem('USER_BOOKS_FOLDER_URI'); 
+      
+      console.log("Storage limpo com sucesso!");
+    } catch (e) {
+      console.error("Erro ao limpar storage:", e);
+    }
+  },
 };
