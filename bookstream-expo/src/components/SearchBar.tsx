@@ -9,6 +9,7 @@ interface Props {
   // Novos props para controlar os filtros
   onToggleFilters: () => void;
   filtersActive: boolean; // Para mudar a cor do ícone se tiver filtro selecionado
+  onFocus?: () => void;
 }
 
 const THEME = {
@@ -19,7 +20,7 @@ const THEME = {
   borderColor: '#E0D6CC',
 };
 
-export default function SearchBar({ value, onChangeText, onSubmit, onToggleFilters, filtersActive }: Props) {
+export default function SearchBar({ value, onChangeText, onSubmit, onToggleFilters, filtersActive, onFocus }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.inputWrapper}>
@@ -35,6 +36,7 @@ export default function SearchBar({ value, onChangeText, onSubmit, onToggleFilte
           onSubmitEditing={onSubmit}
           returnKeyType="search"
           style={styles.input}
+          onFocus={onFocus}
         />
 
         {/* Botão de Limpar Texto (Só aparece se tiver texto) */}
@@ -57,10 +59,6 @@ export default function SearchBar({ value, onChangeText, onSubmit, onToggleFilte
           />
         </TouchableOpacity>
 
-        {/* Botão de BUSCAR (Ação Principal) */}
-        <TouchableOpacity onPress={onSubmit} style={styles.searchBtn}>
-           <Ionicons name="arrow-forward" size={20} color="#fff" />
-        </TouchableOpacity>
       </View>
     </View>
   );
@@ -71,6 +69,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     paddingTop: 20,
+    
   },
   inputWrapper: {
     flexDirection: 'row',
