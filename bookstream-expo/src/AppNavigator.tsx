@@ -73,7 +73,7 @@ export default function AppNavigator() {
     <NavigationContainer>
       <Stack.Navigator
         // 3. Define a Welcome como a primeira tela a abrir
-        initialRouteName="Welcome"
+        // initialRouteName="Welcome"
         
         screenOptions={{
           // Estilo global do cabeçalho (para o BookDetails)

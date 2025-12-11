@@ -1,1 +1,3 @@
 export const LOCAL_SERVER_URL = 'http://192.168.15.44:3000/api'
+
+// export const LOCAL_SERVER_URL = 'https://api.recebamaleficos.online/api'
