@@ -42,9 +42,8 @@ public class BooksController : ControllerBase
 
         var books = await query.ToListAsync();
 
-        // Mapeia para o formato que seu App Mobile já espera
-        // Precisamos gerar a URL completa para o App baixar
         var baseUrl = $"{Request.Scheme}://{Request.Host}/api/books/download";
+        // var baseUrl = "https://api.recebamaleficos.online/api/books/download";
 
         var response = books.Select(b => new
         {
