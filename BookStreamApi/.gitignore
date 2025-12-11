@@ -1,0 +1,13 @@
+# --- .NET / C# Ignorar ---
+# Ignora as pastas onde o código compilado fica
+**/bin/
+**/obj/
+
+# Ignora arquivos de usuário/configurações locais do VS
+.vs/
+*.user
+
+# --- Node / Expo Ignorar (caso não tenha) ---
+node_modules/
+.expo/
+npm-debug.log
