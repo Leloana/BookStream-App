@@ -1,0 +1,37 @@
+name: Testes Automatizados (Expo Frontend)
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'bookstream-expo/**' # Só roda se mudar algo no front
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'bookstream-expo/**'
+
+jobs:
+  test-frontend:
+    runs-on: ubuntu-latest
+    
+    # IMPORTANTE: Define que os comandos rodam dentro da pasta do front
+    defaults:
+      run:
+        working-directory: ./bookstream-expo
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: bookstream-expo/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci # npm ci é mais rápido e seguro para CI do que npm install
+
+      - name: Executar Testes
+        run: npm test
