@@ -1,0 +1,29 @@
+name: Testes Automatizados (.NET Backend)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest 
+
+    steps:
+    - name: Checkout do código
+      uses: actions/checkout@v4
+
+    - name: Configurar .NET 9
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 9.0.x
+
+    - name: Restaurar dependências
+      run: dotnet restore BookStreamApi.Tests/BookStreamApi.Tests.csproj
+
+    - name: Compilar (Build)
+      run: dotnet build BookStreamApi.Tests/BookStreamApi.Tests.csproj --no-restore
+
+    - name: Executar Testes
+      run: dotnet test BookStreamApi.Tests/BookStreamApi.Tests.csproj --no-build --verbosity normal

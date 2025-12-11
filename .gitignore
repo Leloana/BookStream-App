@@ -1,5 +1,11 @@
-/BookStreamApi/bin/Debug/net9.0
-/BookStreamApi/bin/Debug/net9.0
-/BookStreamApi/bin/Debug
-/BookStreamApi/bin
-/BookStreamApi/bin
+# Ignora bin e obj em QUALQUER pasta (API, Tests, etc)
+**/bin/
+**/obj/
+
+# Ignora arquivos de usuário do Visual Studio
+.vs/
+*.user
+
+# Ignora arquivos de log e sistema
+*.log
+.DS_Store
